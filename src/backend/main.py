@@ -3,6 +3,12 @@ import glob
 import uuid
 import json
 import logging
+import warnings
+
+# Suppress annoying third-party warnings
+warnings.filterwarnings("ignore", category=FutureWarning)
+warnings.filterwarnings("ignore", message=".*torch.utils._pytree._register_pytree_node.*")
+
 from fastapi import FastAPI, UploadFile, File, BackgroundTasks, HTTPException
 from fastapi.responses import FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
@@ -47,12 +53,20 @@ for f in glob.glob(os.path.join(OUTPUT_DIR, "*.wav")):
         pass
 logging.info("Cleaned output directory on startup.")
 
+import webbrowser
+import threading
+
 @app.on_event("startup")
 async def startup_event():
     global TTS
     logging.info("Initializing TTS Engine...")
     TTS = TTSEngine()
     logging.info("TTS Engine initialized.")
+    
+    # Auto-open browser once server is ready
+    def open_browser():
+        webbrowser.open("http://localhost:8000")
+    threading.Timer(1.5, open_browser).start()
 
 class SynthesisRequest(BaseModel):
     text: str
@@ -80,7 +94,10 @@ async def get_page_sentences(book_id: str, page_num: int):
     proc = pdf_processors[book_id]
     blocks = proc.extract_page_blocks(page_num)
     sentences = proc.get_sentences(blocks)
-    return {"sentences": sentences}
+    return {
+        "sentences": sentences,
+        "total_pages": proc.get_num_pages()
+    }
 
 @app.get("/api/book/{book_id}/raw")
 async def get_raw_pdf(book_id: str):
@@ -223,5 +240,7 @@ async def get_library():
     return {"books": books}
 
 # Mount frontend
+app.mount("/pdf-file", StaticFiles(directory=UPLOADS_DIR), name="pdf-file")
 app.mount("/", StaticFiles(directory="src/frontend", html=True), name="frontend")
+
 

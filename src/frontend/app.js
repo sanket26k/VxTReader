@@ -68,6 +68,11 @@ document.addEventListener('DOMContentLoaded', async () => {
             textContainer.classList.add('hidden');
             pdfContainer.classList.remove('hidden');
             togglePdfViewBtn.innerHTML = '<i class="fa-solid fa-align-left"></i> Show Text';
+            // Ensure the iframe is on the correct page when shown
+            if (currentBook) {
+                const encodedBook = encodeURIComponent(currentBook).replace(/\(/g, '%28').replace(/\)/g, '%29');
+                pdfFrame.src = `/pdf-file/${encodedBook}#page=${currentPage + 1}`;
+            }
         } else {
             pdfContainer.classList.add('hidden');
             textContainer.classList.remove('hidden');
@@ -111,8 +116,8 @@ document.addEventListener('DOMContentLoaded', async () => {
         // Update active class
         initLibrary();
         
-        // Set iframe src
-        pdfFrame.src = `/api/book/${currentBook}/raw#toolbar=0&navpanes=0`;
+        // Setup toggle button, but don't set iframe src yet because it's hidden.
+        // Setting PDF src while display:none causes "Failed to get StreamContainer" in Chrome.
         togglePdfViewBtn.classList.remove('hidden');
         
         try {
@@ -185,8 +190,7 @@ document.addEventListener('DOMContentLoaded', async () => {
             currentBook = data.book_id;
             totalPages = data.num_pages;
             
-            // Set iframe src
-            pdfFrame.src = `/api/book/${currentBook}/raw#toolbar=0&navpanes=0`;
+            // Setup toggle button
             togglePdfViewBtn.classList.remove('hidden');
             
             initLibrary(); // Refresh library list
@@ -260,6 +264,7 @@ document.addEventListener('DOMContentLoaded', async () => {
             const res = await fetch(`/api/book/${currentBook}/page/${page}`);
             const data = await res.json();
             sentences = data.sentences;
+            totalPages = data.total_pages; // Update from server
             currentPage = page;
             prefetchedPage = null; // reset background cache
             
@@ -271,8 +276,11 @@ document.addEventListener('DOMContentLoaded', async () => {
             document.getElementById('current-title').innerText = currentBook;
             pageControls.classList.remove('hidden');
             
-            // Sync native PDF viewer page (hacky but works for basic viewers)
-            pdfFrame.src = `/api/book/${currentBook}/raw#page=${page + 1}&toolbar=0&navpanes=0`;
+            // Sync native PDF viewer page only if it's currently visible to avoid Chrome StreamContainer crash
+            if (showPdf) {
+                const encodedBook = encodeURIComponent(currentBook).replace(/\(/g, '%28').replace(/\)/g, '%29');
+                pdfFrame.src = `/pdf-file/${encodedBook}#page=${page + 1}`;
+            }
             
             renderSentences();
             setIndex(startIdx);
@@ -320,7 +328,10 @@ document.addEventListener('DOMContentLoaded', async () => {
         currentPage++;
         document.getElementById('page-input').value = currentPage + 1;
         document.getElementById('total-pages').innerText = totalPages;
-        pdfFrame.src = `/api/book/${currentBook}/raw#page=${currentPage + 1}&toolbar=0&navpanes=0`;
+        if (showPdf) {
+            const encodedBook = encodeURIComponent(currentBook).replace(/\(/g, '%28').replace(/\)/g, '%29');
+            pdfFrame.src = `/pdf-file/${encodedBook}#page=${currentPage + 1}`;
+        }
         prefetchedPage = null; // Clear so we can fetch next later
         return true;
     }
