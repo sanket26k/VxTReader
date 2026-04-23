@@ -198,12 +198,17 @@ document.addEventListener('DOMContentLoaded', async () => {
 
     // Save state
     async function saveState() {
-        if (!currentBook || mode !== 'pdf') return;
+        if (!currentBook || mode !== 'pdf' || currentIndex < 0 || !sentences[currentIndex]) return;
+        const currentSentence = sentences[currentIndex];
         try {
             await fetch('/api/save_state', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ book_id: currentBook, page_num: currentPage, sentence_idx: currentIndex })
+                body: JSON.stringify({ 
+                    book_id: currentBook, 
+                    page_num: currentSentence.page, 
+                    sentence_idx: currentSentence.rel_idx 
+                })
             });
         } catch (e) { console.error("Failed to save state", e); }
     }
@@ -563,15 +568,11 @@ document.addEventListener('DOMContentLoaded', async () => {
     async function stopAudio() {
         pauseAudio();
         stopBtn.classList.add('hidden');
-        currentIndex = 0;
+        
+        // Don't reset currentIndex = 0 here, so we remember where we stopped
         
         if (sentences.length > 0) {
-            document.querySelectorAll('.sentence.active').forEach(e => e.classList.remove('active'));
-            const first = document.getElementById('s-0');
-            if (first) {
-                first.classList.add('active');
-                if(!showPdf) first.scrollIntoView({ behavior: 'smooth', block: 'center' });
-            }
+            // No need to reset active class to sentence 0
         }
         
         bufferStatus.innerText = "Stopped & Cleared";

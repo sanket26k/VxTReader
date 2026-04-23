@@ -25,7 +25,6 @@ import asyncio
 
 # Logging setup
 logging.basicConfig(
-    filename="app.log", 
     level=logging.INFO, 
     format="%(asctime)s - %(levelname)s - %(message)s"
 )
@@ -198,7 +197,7 @@ async def get_page_sentences(book_id: str, page_num: int):
         
     proc = pdf_processors[book_id]
     blocks = proc.extract_page_blocks(page_num)
-    sentences = proc.get_sentences(blocks)
+    sentences = proc.get_sentences(blocks, page_idx=page_num)
     return {
         "sentences": sentences,
         "total_pages": proc.get_num_pages()
@@ -328,14 +327,34 @@ class StateRequest(BaseModel):
 
 @app.post("/api/save_state")
 async def save_state(req: StateRequest):
-    state = {}
+    history = {"last_opened": "", "books": {}}
     if os.path.exists(STATE_FILE):
         with open(STATE_FILE, "r") as f:
-            try: state = json.load(f)
+            try: 
+                data = json.load(f)
+                # Handle migration from flat or old 'files' format
+                if "books" in data:
+                    history = data
+                else:
+                    # Migrate old top-level book entries or 'files' key
+                    if "files" in data:
+                        history["books"].update(data["files"])
+                        del data["files"]
+                    if "last_opened" in data:
+                        history["last_opened"] = data["last_opened"]
+                        del data["last_opened"]
+                    # Any remaining keys are treated as book_ids
+                    for k, v in data.items():
+                        if isinstance(v, dict):
+                            history["books"][k] = v
             except: pass
-    state[req.book_id] = {"page": req.page_num, "sentence_idx": req.sentence_idx}
+            
+    history["last_opened"] = req.book_id
+    # Ensure consistent key name 'sentence_idx'
+    history["books"][req.book_id] = {"page": req.page_num, "sentence_idx": req.sentence_idx}
+    
     with open(STATE_FILE, "w") as f:
-        json.dump(state, f)
+        json.dump(history, f)
     return {"status": "ok"}
 
 @app.get("/api/load_state/{book_id}")
@@ -343,9 +362,15 @@ async def load_state(book_id: str):
     if os.path.exists(STATE_FILE):
         with open(STATE_FILE, "r") as f:
             try: 
-                state = json.load(f)
-                if book_id in state:
-                    return state[book_id]
+                data = json.load(f)
+                books = data.get("books", data) # Fallback for old format
+                if book_id in books:
+                    state = books[book_id]
+                    # Compatibility fix for 'sentence_index' vs 'sentence_idx'
+                    return {
+                        "page": state.get("page", 0),
+                        "sentence_idx": state.get("sentence_idx", state.get("sentence_index", 0))
+                    }
             except: pass
     return {"page": 0, "sentence_idx": 0}
 
@@ -353,10 +378,12 @@ async def load_state(book_id: str):
 async def get_library():
     """Returns a list of all PDFs currently in the uploads directory and their reading progress."""
     books = []
-    state = {}
+    history_books = {}
     if os.path.exists(STATE_FILE):
         with open(STATE_FILE, "r") as f:
-            try: state = json.load(f)
+            try: 
+                data = json.load(f)
+                history_books = data.get("books", data)
             except: pass
             
     if os.path.exists(UPLOADS_DIR):
@@ -364,7 +391,7 @@ async def get_library():
             if f.endswith('.pdf'):
                 books.append({
                     "id": f,
-                    "page": state.get(f, {}).get("page", 0)
+                    "page": history_books.get(f, {}).get("page", 0)
                 })
     return {"books": books}
 

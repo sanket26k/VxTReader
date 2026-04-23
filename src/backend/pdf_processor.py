@@ -34,7 +34,7 @@ class PDFProcessor:
         return text.strip()
 
     @staticmethod
-    def get_sentences(blocks: list[str]) -> list[dict]:
+    def get_sentences(blocks: list[str], page_idx: int = 0) -> list[dict]:
         final_sentences = []
         for block_idx, block in enumerate(blocks):
             # Protect initials and common titles
@@ -56,17 +56,33 @@ class PDFProcessor:
                     current_chunk = ""
                     for i, chunk in enumerate(chunks):
                         if len(current_chunk) + len(chunk) > 250 and current_chunk:
-                            final_sentences.append({"text": current_chunk.strip(), "is_new_paragraph": is_new_paragraph and i == 0})
+                            final_sentences.append({
+                                "text": current_chunk.strip(), 
+                                "is_new_paragraph": is_new_paragraph and i == 0,
+                                "page": page_idx,
+                                "rel_idx": len(final_sentences)
+                            })
                             current_chunk = chunk
                         else:
                             current_chunk += " " + chunk if current_chunk else chunk
                     if current_chunk:
-                        final_sentences.append({"text": current_chunk.strip(), "is_new_paragraph": is_new_paragraph and len(chunks) == 1})
+                        final_sentences.append({
+                            "text": current_chunk.strip(), 
+                            "is_new_paragraph": is_new_paragraph and len(chunks) == 1,
+                            "page": page_idx,
+                            "rel_idx": len(final_sentences)
+                        })
                 else:
-                    final_sentences.append({"text": s, "is_new_paragraph": is_new_paragraph})
+                    final_sentences.append({
+                        "text": s, 
+                        "is_new_paragraph": is_new_paragraph,
+                        "page": page_idx,
+                        "rel_idx": len(final_sentences)
+                    })
                     
         return final_sentences
         
     def close(self):
         self.doc.close()
+
 

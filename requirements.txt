@@ -1,9 +1,12 @@
 streamlit
 PyMuPDF==1.25.3
 TTS==0.22.0
+torch==2.5.1+cu121
+torchaudio==2.5.1+cu121
 soundfile==0.13.1
 fastapi
 uvicorn
 python-multipart
+transformers==4.33.0
 numpy<2.0.0
 pandas<2.0.0
