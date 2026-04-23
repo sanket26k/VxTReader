@@ -183,6 +183,40 @@ body {
     align-items: center;
 }
 
+.model-toggle-row {
+    margin-bottom: 20px;
+}
+
+.model-toggle {
+    display: flex;
+    background: var(--bg-main);
+    border-radius: 8px;
+    overflow: hidden;
+    border: 1px solid var(--border);
+    margin-top: 8px;
+}
+
+.model-toggle input[type="radio"] {
+    display: none;
+}
+
+.model-toggle label {
+    flex: 1;
+    padding: 10px 0;
+    text-align: center;
+    cursor: pointer;
+    font-size: 0.85rem;
+    font-weight: 500;
+    color: var(--text-secondary);
+    transition: all 0.2s;
+    user-select: none;
+}
+
+.model-toggle input[type="radio"]:checked + label {
+    background: var(--accent);
+    color: white;
+}
+
 /* Switch */
 .switch {
   position: relative;

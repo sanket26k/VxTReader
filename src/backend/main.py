@@ -16,7 +16,13 @@ from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 
 from .pdf_processor import PDFProcessor
-from .tts_engine import TTSEngine
+
+# Import the new TTS Engines
+from .tts_engine_xtts import XTTSEngine
+from .tts_engine_yourtts import YourTTSEngine
+from .tts_engine_kokoro import KokoroEngine
+
+import asyncio
 
 # Logging setup
 logging.basicConfig(
@@ -35,8 +41,17 @@ app.add_middleware(
 )
 
 # Global instances
-TTS = None
+TTS_ENGINES_CLASSES = {
+    "xtts": XTTSEngine,
+    "yourtts": YourTTSEngine
+}
+active_tts = None
+active_tts_name = None
 pdf_processors = {}
+
+# TTS Queue
+tts_queue = asyncio.Queue()
+tts_status = {}  # key -> {"status": "queued"|"generating"|"ready"|"error", "filename": str}
 
 # Directories
 UPLOADS_DIR = "uploads"
@@ -55,21 +70,112 @@ logging.info("Cleaned output directory on startup.")
 
 import webbrowser
 import threading
+import traceback
+
+def tts_worker_sync(req, engine, ref_voice, output_path):
+    try:
+        return engine.synthesize(req.text, ref_voice, output_path, speed=req.speed)
+    except Exception as e:
+        logging.error(f"TTS synthesis failed: {traceback.format_exc()}")
+        raise e
+
+async def tts_worker_task():
+    while True:
+        req = await tts_queue.get()
+        key = req.key
+        
+        if active_tts is None:
+            tts_status[key] = {"status": "error", "message": "No active TTS engine"}
+            tts_queue.task_done()
+            continue
+            
+        tts_status[key] = {"status": "generating"}
+        filename = f"{key}.wav"
+        output_path = os.path.join(OUTPUT_DIR, filename)
+        ref_voice = "sample_voice.wav"
+        
+        try:
+            # Run the synchronous TTS generation in a threadpool so we don't block FastAPI
+            await asyncio.to_thread(tts_worker_sync, req, active_tts, ref_voice, output_path)
+            tts_status[key] = {"status": "ready", "audio_url": f"/audio/{filename}", "filename": filename}
+        except Exception as e:
+            tts_status[key] = {"status": "error", "message": str(e)}
+            
+        tts_queue.task_done()
 
 @app.on_event("startup")
 async def startup_event():
-    global TTS
-    logging.info("Initializing TTS Engine...")
-    TTS = TTSEngine()
-    logging.info("TTS Engine initialized.")
+    global active_tts, active_tts_name
+    logging.info("Initializing Default TTS Engine (XTTS)...")
+    
+    try:
+        active_tts = XTTSEngine()
+        active_tts_name = "xtts"
+        logging.info("Active TTS Engine set to: xtts")
+    except Exception as e:
+        logging.error(f"Failed to load XTTS: {e}")
+        try:
+            active_tts = YourTTSEngine()
+            active_tts_name = "yourtts"
+        except:
+            pass
+
+    # Start background worker
+    asyncio.create_task(tts_worker_task())
     
     # Auto-open browser once server is ready
     def open_browser():
         webbrowser.open("http://localhost:8000")
     threading.Timer(1.5, open_browser).start()
 
-class SynthesisRequest(BaseModel):
+class SetModelRequest(BaseModel):
+    model_name: str
+
+@app.post("/api/set_model")
+async def set_model(req: SetModelRequest):
+    global active_tts, active_tts_name
+    if req.model_name not in TTS_ENGINES_CLASSES:
+        raise HTTPException(status_code=404, detail="Model not found")
+        
+    if active_tts_name == req.model_name:
+        return {"status": "ok", "active_model": active_tts_name, "native_speed": getattr(active_tts, 'native_speed', 1.0) if active_tts else 1.0}
+        
+    logging.info(f"Switching TTS model to {req.model_name}...")
+    
+    # Unload previous model
+    if active_tts is not None:
+        del active_tts
+        active_tts = None
+        import torch
+        import gc
+        if torch.cuda.is_available():
+            torch.cuda.empty_cache()
+        gc.collect()
+        
+    # Load new model
+    try:
+        active_tts = TTS_ENGINES_CLASSES[req.model_name]()
+        active_tts_name = req.model_name
+        active_tts.native_speed = 1.0
+    except Exception as e:
+        logging.error(f"Failed to load {req.model_name}: {e}")
+        raise HTTPException(status_code=500, detail=f"Failed to load model: {e}")
+        
+    return {"status": "ok", "active_model": active_tts_name, "native_speed": active_tts.native_speed}
+
+@app.get("/api/get_models")
+async def get_models():
+    native_speed = getattr(active_tts, 'native_speed', 1.0) if active_tts else 1.0
+    return {
+        "models": list(TTS_ENGINES_CLASSES.keys()),
+        "active": active_tts_name,
+        "native_speed": native_speed
+    }
+
+class EnqueueRequest(BaseModel):
     text: str
+    key: str
+    speed: float = 1.0
 
 @app.post("/api/upload")
 async def upload_pdf(file: UploadFile = File(...)):
@@ -122,24 +228,42 @@ async def process_custom_text(req: CustomTextRequest):
         
     return {"sentences": sentences}
 
-@app.post("/api/synthesize")
-async def synthesize_text(req: SynthesisRequest):
-    if not TTS:
+@app.post("/api/enqueue_text")
+async def enqueue_text(req: EnqueueRequest):
+    if not active_tts:
         raise HTTPException(status_code=503, detail="TTS Engine not loaded yet.")
     
-    filename = f"{uuid.uuid4()}.wav"
-    output_path = os.path.join(OUTPUT_DIR, filename)
+    # If already queued or ready, ignore
+    if req.key in tts_status and tts_status[req.key]["status"] in ["queued", "generating", "ready"]:
+        return {"status": tts_status[req.key]["status"]}
+        
+    tts_status[req.key] = {"status": "queued"}
+    await tts_queue.put(req)
     
-    ref_voice = "sample_voice.wav"
-    if not os.path.exists(ref_voice):
-        raise HTTPException(status_code=400, detail="sample_voice.wav not found in root directory.")
-    
-    try:
-        TTS.synthesize(req.text, ref_voice, output_path)
-        return {"audio_url": f"/audio/{filename}", "filename": filename}
-    except Exception as e:
-        logging.error(f"TTS synthesis failed: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+    return {"status": "queued"}
+
+@app.get("/api/check_audio/{key}")
+async def check_audio(key: str):
+    if key not in tts_status:
+        return {"status": "not_found"}
+    return tts_status[key]
+
+@app.post("/api/clear_queue")
+async def clear_queue():
+    # Empty the queue
+    while not tts_queue.empty():
+        try:
+            tts_queue.get_nowait()
+            tts_queue.task_done()
+        except asyncio.QueueEmpty:
+            break
+            
+    # Keep ready items, clear queued
+    for k in list(tts_status.keys()):
+        if tts_status[k]["status"] == "queued":
+            del tts_status[k]
+            
+    return {"status": "cleared"}
 
 @app.get("/audio/{filename}")
 async def get_audio(filename: str):
@@ -151,6 +275,12 @@ async def get_audio(filename: str):
 @app.delete("/api/delete_audio/{filename}")
 async def delete_audio(filename: str):
     path = os.path.join(OUTPUT_DIR, filename)
+    
+    # Also clean up from status map if it's there
+    key = filename.replace(".wav", "")
+    if key in tts_status:
+        del tts_status[key]
+        
     if os.path.exists(path):
         try:
             os.remove(path)

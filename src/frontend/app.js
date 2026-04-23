@@ -10,6 +10,7 @@ document.addEventListener('DOMContentLoaded', async () => {
     
     let currentPage = 0;
     let totalPages = 0;
+    let currentNativeSpeed = 1.0;
     
     // Background Prefetching State
     let prefetchedPage = null;
@@ -20,7 +21,8 @@ document.addEventListener('DOMContentLoaded', async () => {
     let isSynthesizing = {}; // index -> boolean
     
     // Constants
-    const REQUIRED_BUFFER_AHEAD = 3; // How many sentences to buffer before playing
+    const REQUIRED_BUFFER_AHEAD = 7; // Increased for background queue buffer
+    const PREFETCH_LIMIT = 30; // How many sentences to keep queued ahead
     
     // DOM Elements
     const audioPlayer = document.getElementById('audio-player');
@@ -49,6 +51,8 @@ document.addEventListener('DOMContentLoaded', async () => {
     const sidebar = document.getElementById('sidebar');
     const toggleSidebarBtn = document.getElementById('toggle-sidebar');
     const expandSidebarBtn = document.getElementById('expand-sidebar');
+    
+    const modelToggleContainer = document.getElementById('model-toggle-container');
 
     // Sidebar Toggle
     toggleSidebarBtn.addEventListener('click', () => {
@@ -156,9 +160,38 @@ document.addEventListener('DOMContentLoaded', async () => {
     // Settings
     contToggle.addEventListener('change', (e) => isContinuous = e.target.checked);
     speedSlider.addEventListener('input', (e) => {
-        audioPlayer.playbackRate = e.target.value;
-        speedVal.innerText = `${Number(e.target.value).toFixed(1)}x`;
+        const uiSpeed = parseFloat(e.target.value);
+        audioPlayer.playbackRate = uiSpeed / currentNativeSpeed; 
+        speedVal.innerText = `${uiSpeed.toFixed(1)}x`;
     });
+    
+    modelToggleContainer.addEventListener('change', async (e) => {
+        if (e.target.name === 'tts-model') {
+            const val = e.target.value;
+            try {
+                bufferStatus.innerText = `Loading ${val}...`;
+                const res = await fetch('/api/set_model', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ model_name: val })
+                });
+                const data = await res.json();
+                currentNativeSpeed = data.native_speed || 1.0;
+                bufferStatus.innerText = `Model set to ${val}`;
+                
+                // Clear audio cache so we don't play old model's audio
+                await fetch('/api/clear_queue', { method: 'POST' });
+                audioCache = {};
+                isSynthesizing = {};
+                
+                // Update active playback rate
+                const uiSpeed = parseFloat(speedSlider.value);
+                audioPlayer.playbackRate = uiSpeed / currentNativeSpeed;
+                
+            } catch(err) { console.error(err); }
+        }
+    });
+
     volSlider.addEventListener('input', (e) => {
         audioPlayer.volume = e.target.value;
     });
@@ -298,6 +331,9 @@ document.addEventListener('DOMContentLoaded', async () => {
             const res = await fetch(`/api/book/${currentBook}/page/${currentPage + 1}`);
             const data = await res.json();
             prefetchedPage = data.sentences;
+            
+            // Immediately transition and fetch next so sentences array grows and prefetcher can chew it
+            transitionToNextPage();
         } catch(e) {
             console.error("Prefetch failed", e);
         } finally {
@@ -426,7 +462,7 @@ document.addEventListener('DOMContentLoaded', async () => {
         }
         
         audioPlayer.src = url;
-        audioPlayer.playbackRate = speedSlider.value;
+        audioPlayer.playbackRate = parseFloat(speedSlider.value) / currentNativeSpeed;
         audioPlayer.volume = volSlider.value;
         
         try {
@@ -444,25 +480,74 @@ document.addEventListener('DOMContentLoaded', async () => {
         }
     }
 
+    // Unbounded Prefetch Loop
+    async function prefetchLoop() {
+        if (!currentBook || mode !== 'pdf' || !isPlaying) return;
+        
+        // Find how many sentences ahead are currently queued or ready
+        const targetIdx = currentIndex + PREFETCH_LIMIT;
+        const limit = Math.min(targetIdx, sentences.length);
+        
+        for (let i = currentIndex; i < limit; i++) {
+            if (!audioCache[i] && !isSynthesizing[i]) {
+                bufferAudio(i);
+            }
+        }
+        
+        // Fetch next pages continuously to keep the sentences array full
+        if (sentences.length - currentIndex < PREFETCH_LIMIT) {
+            backgroundCacheNextPage();
+        }
+    }
+    
+    // Periodically run prefetch
+    setInterval(prefetchLoop, 1000);
+
     // Request Synthesis
     async function bufferAudio(idx) {
         if (idx < 0 || idx >= sentences.length) return null;
         if (audioCache[idx] || isSynthesizing[idx]) return;
         
         isSynthesizing[idx] = true;
+        const key = `${currentBook}_p${currentPage}_s${idx}`.replace(/[^a-zA-Z0-9_]/g, '_');
         try {
-            const res = await fetch('/api/synthesize', {
+            await fetch('/api/enqueue_text', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ text: sentences[idx].text })
+                body: JSON.stringify({ 
+                    text: sentences[idx].text, 
+                    key: key,
+                    speed: 1.5 // Native speed
+                })
             });
-            const data = await res.json();
-            audioCache[idx] = data.audio_url;
+            
+            // Start polling
+            pollAudio(idx, key);
         } catch (err) {
-            console.error("Synth failed", err);
-        } finally {
+            console.error("Synth enqueue failed", err);
             isSynthesizing[idx] = false;
         }
+    }
+    
+    async function pollAudio(idx, key) {
+        const interval = setInterval(async () => {
+            try {
+                const res = await fetch(`/api/check_audio/${key}`);
+                const data = await res.json();
+                
+                if (data.status === 'ready') {
+                    audioCache[idx] = data.audio_url;
+                    isSynthesizing[idx] = false;
+                    clearInterval(interval);
+                } else if (data.status === 'error' || data.status === 'not_found') {
+                    isSynthesizing[idx] = false;
+                    clearInterval(interval);
+                }
+            } catch(e) {
+                isSynthesizing[idx] = false;
+                clearInterval(interval);
+            }
+        }, 1000);
     }
 
     // Cleanup Audio
@@ -496,6 +581,7 @@ document.addEventListener('DOMContentLoaded', async () => {
         isPreparing = false;
         
         try {
+            await fetch('/api/clear_queue', { method: 'POST' });
             await fetch('/api/cleanup_all', { method: 'POST' });
         } catch(e) {}
     }
@@ -557,5 +643,30 @@ document.addEventListener('DOMContentLoaded', async () => {
     });
 
     // Boot
-    initLibrary();
+    async function init() {
+        initLibrary();
+        try {
+            const res = await fetch('/api/get_models');
+            const data = await res.json();
+            currentNativeSpeed = data.native_speed || 1.0;
+            modelToggleContainer.innerHTML = '';
+            data.models.forEach(m => {
+                const radio = document.createElement('input');
+                radio.type = 'radio';
+                radio.name = 'tts-model';
+                radio.id = `model-${m}`;
+                radio.value = m;
+                if (m === data.active) radio.checked = true;
+                
+                const label = document.createElement('label');
+                label.htmlFor = `model-${m}`;
+                label.innerText = m.toUpperCase();
+                
+                modelToggleContainer.appendChild(radio);
+                modelToggleContainer.appendChild(label);
+            });
+        } catch(e) {}
+    }
+    
+    init();
 });
