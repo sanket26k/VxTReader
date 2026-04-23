@@ -19,7 +19,7 @@ sample_voice.wav
 .idea/
 
 # Internal
-.gemini/
+.gemini
 scratch/
 
 # OS
