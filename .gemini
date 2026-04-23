@@ -1,0 +1,29 @@
+# NaturalReader Clone Project Context
+
+## Overview
+This project is a local, privacy-focused utility that replicates the core functionality of NaturalReader. It allows users to read PDF files using zero-shot voice cloning of their own voice, ensuring all data remains on the user's machine.
+
+## Tech Stack
+- **Environment Management:** `uv`
+- **Frontend/UI:** `Streamlit` (Modern local Web UI)
+- **PDF Extraction:** `PyMuPDF`
+- **Text-to-Speech:** `Coqui TTS` (Model: `xtts_v2`)
+- **Audio Playback:** HTML5 Native Audio player (via Streamlit)
+
+## Core Features & Requirements
+1. **File Handling:** Upload PDFs, extract clean text, handle headers/footers.
+2. **Text Processing & TTS:** Clean text and synthesize it using a local TTS engine.
+3. **Voice Cloning:** Zero-shot cloning using a 10-30s reference audio sample.
+4. **UI & Playback:** Local web UI, play/pause, volume control, native playback speed controls (no ffmpeg required since we use the browser player).
+5. **State Management:** Remember progress (page, line/sentence) across *multiple* books so progress is never lost when switching.
+6. **Execution:** Local CPU/GPU. Optimized for GTX 1660 Super (6GB VRAM). No external APIs.
+
+## Future Explorations & Enhancements
+- **VibeVoice:** Investigate integrating `VibeVoice` as an alternative or upgrade to the current TTS engine.
+- **Fine-Tuning:** The user mentioned potentially adding 2-3 hours of voice data for further training of the voice model in the future.
+
+## Current System Info
+- OS: Windows
+- GPU: Nvidia GTX 1660 Super (6GB VRAM)
+- Python Manager: `uv`
+- Has ffmpeg: Yes

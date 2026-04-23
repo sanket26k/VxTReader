@@ -1,0 +1,110 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Privacy Reader</title>
+    <link rel="stylesheet" href="style.css">
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+    <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css" rel="stylesheet">
+</head>
+<body>
+    <div class="app-container">
+        <!-- Sidebar -->
+        <aside class="sidebar" id="sidebar">
+            <div class="logo">
+                <i class="fa-solid fa-book-open-reader"></i>
+                <h2>Privacy Reader</h2>
+                <button id="toggle-sidebar" class="icon-btn" title="Collapse Sidebar"><i class="fa-solid fa-chevron-left"></i></button>
+            </div>
+            
+            <div class="mode-switch">
+                <button id="btn-mode-pdf" class="active">PDF Library</button>
+                <button id="btn-mode-text">Custom Text</button>
+            </div>
+
+            <div id="pdf-controls" class="control-section">
+                <h3>Library</h3>
+                <input type="file" id="pdf-upload" accept=".pdf" style="display: none;">
+                <button class="upload-btn" onclick="document.getElementById('pdf-upload').click()">
+                    <i class="fa-solid fa-upload"></i> Upload PDF
+                </button>
+                <div id="library-list" class="library-list">
+                    <!-- Books will be listed here -->
+                </div>
+            </div>
+
+            <div class="settings">
+                <h3>Settings</h3>
+                <div class="setting-row">
+                    <label>Speed</label>
+                    <input type="range" id="speed-slider" min="1.0" max="3.0" step="0.1" value="1.0">
+                    <span id="speed-val">1.0x</span>
+                </div>
+                <div class="setting-row">
+                    <label>Volume</label>
+                    <input type="range" id="volume-slider" min="0" max="1" step="0.05" value="1.0">
+                </div>
+                <div class="setting-row toggle-row">
+                    <label for="continuous-toggle">Continuous Play</label>
+                    <label class="switch">
+                        <input type="checkbox" id="continuous-toggle" checked>
+                        <span class="slider round"></span>
+                    </label>
+                </div>
+            </div>
+        </aside>
+
+        <!-- Main Content -->
+        <main class="main-content" id="main-content">
+            <button id="expand-sidebar" class="icon-btn hidden floating-btn" title="Expand Sidebar"><i class="fa-solid fa-bars"></i></button>
+            <div id="custom-text-input" class="hidden">
+                <h2>Paste Custom Text</h2>
+                <textarea id="raw-text" placeholder="Paste your text here..."></textarea>
+                <button id="process-text-btn" class="primary-btn">Process & Read</button>
+            </div>
+
+            <div id="reader-view">
+                <div class="reader-header">
+                    <div class="title-area">
+                        <h2 id="current-title">Welcome</h2>
+                        <button id="toggle-pdf-view" class="secondary-btn hidden"><i class="fa-solid fa-file-pdf"></i> Show PDF</button>
+                    </div>
+                    <div class="page-controls hidden" id="page-controls">
+                        <button id="prev-page" title="Previous Page"><i class="fa-solid fa-chevron-left"></i></button>
+                        <div class="page-jump-container">
+                            Page <input type="number" id="page-input" value="1" min="1"> / <span id="total-pages">1</span>
+                        </div>
+                        <button id="next-page" title="Next Page"><i class="fa-solid fa-chevron-right"></i></button>
+                    </div>
+                </div>
+                
+                <div id="content-area" class="content-area">
+                    <div id="text-container" class="text-container">
+                        <p class="placeholder-text">Select a book from the library or paste custom text to begin reading.</p>
+                    </div>
+                    <div id="pdf-container" class="pdf-container hidden">
+                        <iframe id="pdf-frame" src=""></iframe>
+                    </div>
+                </div>
+
+                <!-- Floating Playback Controls -->
+                <div class="playback-controls">
+                    <button id="prev-btn" class="ctrl-btn" title="Previous Sentence"><i class="fa-solid fa-backward-step"></i></button>
+                    <button id="play-pause-btn" class="ctrl-btn main-ctrl"><i class="fa-solid fa-play"></i></button>
+                    <button id="stop-btn" class="ctrl-btn hidden" title="Stop & Clear"><i class="fa-solid fa-stop"></i></button>
+                    <button id="next-btn" class="ctrl-btn" title="Next Sentence"><i class="fa-solid fa-forward-step"></i></button>
+                    <div class="status-indicator">
+                        <span id="buffer-status">Ready</span>
+                    </div>
+                </div>
+            </div>
+        </main>
+    </div>
+    
+    <!-- Audio Element (Hidden) -->
+    <audio id="audio-player"></audio>
+
+    <script src="app.js"></script>
+</body>
+</html>

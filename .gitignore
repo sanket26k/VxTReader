@@ -1,0 +1,27 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+.venv/
+build/
+dist/
+*.egg-info/
+
+# Project Specific
+output/
+uploads/
+*.log
+history.json
+sample_voice.wav
+
+# IDEs
+.vscode/
+.idea/
+
+# Internal
+.gemini/
+scratch/
+
+# OS
+.DS_Store
+Thumbs.db
