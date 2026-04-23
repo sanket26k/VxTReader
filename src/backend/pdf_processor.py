@@ -28,9 +28,39 @@ class PDFProcessor:
 
     @staticmethod
     def clean_text(text: str) -> str:
-        text = text.replace('\n', ' ')
+        # 1. Normalize common PDF ligatures
+        ligatures = {
+            "ﬁ": "fi", "ﬂ": "fl", "ﬀ": "ff", "ﬃ": "ffi", "ﬄ": "ffl",
+            "’": "'", "‘": "'", "”": '"', "“": '"', "–": "-", "—": "-"
+        }
+        for k, v in ligatures.items():
+            text = text.replace(k, v)
+
+        # 2. Basic cleaning (newlines, tabs)
+        text = text.replace('\n', ' ').replace('\r', ' ').replace('\t', ' ')
+        
+        # 3. Remove overstriking (common in bold PDF text where chars are doubled: 'TThhee')
+        # We only do this if we see a pattern of repeated characters in a word
+        def de_overstrike(m):
+            word = m.group(0)
+            if len(word) > 2:
+                # Check if even/odd characters are identical
+                even = word[0::2]
+                odd = word[1::2]
+                if even == odd:
+                    return even
+            return word
+        
+        # Only attempt on words that look like they might be overstruck
+        text = re.sub(r'\b(\w\w){2,}\b', de_overstrike, text)
+
+        # 4. Filter to keep only standard ASCII alphanumeric and basic punctuation
+        # This removes control characters and weird math/symbols that confuse TTS
+        text = re.sub(r'[^a-zA-Z0-9\s.,!?;:\-\'\"()\[\]]', '', text)
+        
+        # 5. Collapse whitespace
         text = re.sub(r'\s+', ' ', text)
-        text = re.sub(r'[^\x00-\x7F]+', '', text)
+        
         return text.strip()
 
     @staticmethod
